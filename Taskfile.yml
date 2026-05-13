@@ -1,0 +1,21 @@
+version: '3'
+
+vars:
+  BINARY: ./bin/tsk
+  CMD: ./cmd/tsk
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo "dev"
+
+tasks:
+  build:
+    cmds:
+      - mkdir -p ./bin
+      - go build -ldflags "-X github.com/tesserakdev/tsk/internal/version.Version={{.VERSION}}" -o {{.BINARY}} {{.CMD}}
+
+  test:
+    cmds:
+      - go test ./...
+
+  lint:
+    cmds:
+      - golangci-lint run ./...

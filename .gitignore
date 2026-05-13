@@ -1,0 +1,30 @@
+# Build output
+/bin/
+/dist/
+
+# Compiled object files and binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary and coverage output
+*.test
+*.out
+
+# Environment files
+*.env
+
+# OS metadata
+.DS_Store
+
+# Editor swap files
+*.swp
+
+# Claude Code local settings
+.claude/
+
+.vscode/
+.cursor/
+.codacy/

@@ -1,0 +1,58 @@
+version: 1
+
+# instructions is injected into the agent's system context via MCP's initialize
+# response. Use it to tell the agent to prefer tsk tools over CLI alternatives.
+instructions: |
+  When a tsk tool is available for an operation, always use it instead of CLI
+  alternatives (gh, stripe, curl, etc.). tsk enforces credential isolation,
+  rate limits, and audit logging — bypassing it via CLI defeats those controls.
+
+tools:
+  # Stripe: create a refund (capped at $50)
+  - name: stripe_create_refund
+    description: "Issue a refund for a Stripe charge. Use this when the user asks to refund a payment. Maximum refund is $50."
+    type: http
+    endpoint: https://api.stripe.com/v1/refunds
+    method: POST
+    auth: bearer ${STRIPE_SECRET_KEY}
+    rules:
+      max_calls_per_minute: 5
+      allowed_params:
+        - charge
+        - amount
+      param_constraints:
+        amount:
+          max: 5000 # cents — $50 maximum refund
+      max_log_bytes: 0 # retain full response body in the audit log
+
+  # GitHub: list open pull requests
+  - name: github_list_prs
+    description: "List open pull requests for a GitHub repository. Returns PR titles, authors, and URLs."
+    type: http
+    endpoint: https://api.github.com/repos/{owner}/{repo}/pulls
+    method: GET
+    auth: bearer ${GITHUB_TOKEN}
+    rules:
+      max_calls_per_minute: 30
+      allowed_params:
+        - owner
+        - repo
+
+  # Jira: get issue details
+  - name: jira_get_issue
+    description: "Fetch the details of a Jira issue by its key (e.g. PROJ-123). Returns summary, status, assignee, and description."
+    type: http
+    endpoint: https://your-domain.atlassian.net/rest/api/3/issue/{issue_key}
+    method: GET
+    auth: bearer ${JIRA_API_TOKEN}
+    rules:
+      allowed_params:
+        - issue_key
+
+scrubbing:
+  - type: credit_card
+  - type: email
+  - type: iban
+  # Redact internal IDs from responses
+  - pattern: '"internal_id":\s*"\w+"'
+    replace: '"internal_id": "[REDACTED]"'
