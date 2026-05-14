@@ -47,11 +47,13 @@ type ToolRules struct {
 	MaxLogBytes *int `yaml:"max_log_bytes"`
 }
 
-// ParamConstraint defines optional numeric min/max bounds for a single
-// parameter.
+// ParamConstraint defines optional constraints for a single parameter.
+// AllowedValues restricts the parameter to an explicit set of string values.
+// Min and Max enforce numeric bounds.
 type ParamConstraint struct {
-	Max *float64 `yaml:"max"`
-	Min *float64 `yaml:"min"`
+	Max           *float64 `yaml:"max"`
+	Min           *float64 `yaml:"min"`
+	AllowedValues []string `yaml:"allowed_values"`
 }
 
 // ScrubRule describes one response-scrubbing rule, either a built-in named
@@ -152,6 +154,15 @@ func (c *Config) validate() error {
 		}
 		if t.Rules.MaxLogBytes != nil && *t.Rules.MaxLogBytes < 0 {
 			return fmt.Errorf("tool %q: max_log_bytes cannot be negative", t.Name)
+		}
+
+		for param, constraint := range t.Rules.ParamConstraints {
+			if constraint.AllowedValues != nil && len(constraint.AllowedValues) == 0 {
+				return fmt.Errorf("tool %q: param %q allowed_values must not be empty", t.Name, param)
+			}
+			if len(constraint.AllowedValues) > 0 && (constraint.Min != nil || constraint.Max != nil) {
+				return fmt.Errorf("tool %q: param %q cannot combine allowed_values with min/max", t.Name, param)
+			}
 		}
 
 		u, err := url.Parse(t.Endpoint)

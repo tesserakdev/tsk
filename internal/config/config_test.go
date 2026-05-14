@@ -367,6 +367,83 @@ tools:
 	}
 }
 
+func TestLoad_AllowedValues(t *testing.T) {
+	path := writeTemp(t, `
+version: 1
+tools:
+  - name: send_message
+    description: "Send a message to an internal recipient."
+    type: http
+    endpoint: https://mail.example.com/send
+    method: POST
+    rules:
+      param_constraints:
+        to:
+          allowed_values:
+            - alice@company.com
+            - bob@company.com
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	constraint := cfg.Tools[0].Rules.ParamConstraints["to"]
+	if len(constraint.AllowedValues) != 2 {
+		t.Fatalf("expected 2 allowed values, got %d", len(constraint.AllowedValues))
+	}
+	if constraint.AllowedValues[0] != "alice@company.com" {
+		t.Errorf("AllowedValues[0] = %q, want %q", constraint.AllowedValues[0], "alice@company.com")
+	}
+}
+
+func TestLoad_AllowedValues_EmptyList(t *testing.T) {
+	path := writeTemp(t, `
+version: 1
+tools:
+  - name: send_message
+    description: "Send a message to an internal recipient."
+    type: http
+    endpoint: https://mail.example.com/send
+    method: POST
+    rules:
+      param_constraints:
+        to:
+          allowed_values: []
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for empty allowed_values, got nil")
+	}
+	if !strings.Contains(err.Error(), "allowed_values must not be empty") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoad_AllowedValues_CombinedWithMinMax(t *testing.T) {
+	path := writeTemp(t, `
+version: 1
+tools:
+  - name: send_message
+    description: "Send a message to an internal recipient."
+    type: http
+    endpoint: https://mail.example.com/send
+    method: POST
+    rules:
+      param_constraints:
+        to:
+          allowed_values:
+            - alice@company.com
+          max: 100
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for allowed_values combined with max, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot combine allowed_values with min/max") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestLoad_ZeroMaxLogBytes(t *testing.T) {
 	path := writeTemp(t, `
 version: 1

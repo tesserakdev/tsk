@@ -49,6 +49,25 @@ tools:
       allowed_params:
         - issue_key
 
+  # Internal mail: restrict recipients to a fixed allowlist
+  - name: send_internal_mail
+    description: "Send an email to an approved internal recipient."
+    type: http
+    endpoint: https://mail.example.com/send
+    method: POST
+    auth: bearer ${MAIL_API_TOKEN}
+    rules:
+      max_calls_per_minute: 10
+      allowed_params:
+        - to
+        - subject
+        - body
+      param_constraints:
+        to:
+          allowed_values:
+            - alice@company.com
+            - bob@company.com
+
 scrubbing:
   - type: credit_card
   - type: email

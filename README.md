@@ -256,7 +256,11 @@ tools:
         - currency
       param_constraints:          # Hard limits on parameter values
         amount:
-          max: 5000
+          max: 5000               # Numeric upper bound
+          min: 1                  # Numeric lower bound
+        to:
+          allowed_values:         # Restrict to an explicit string allowlist
+            - alice@company.com
       max_log_bytes: int          # Audit log body cap: 0 = no truncation, omit = default 4 KB
 
 scrubbing:
