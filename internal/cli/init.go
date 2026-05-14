@@ -75,13 +75,12 @@ const defaultSecrets = `# tsk secrets — never commit this file
 const defaultRules = `version: 1
 
 # instructions is injected into the agent's system context on connect.
-# Use it to tell the agent to prefer tsk tools over CLI alternatives.
-# instructions: |
-#   When a tsk tool covers an operation you need, use it instead of CLI
-#   alternatives (gh, stripe, curl, etc.).
+instructions: |
+  When a tsk tool covers an operation you need, use it instead of CLI
+  alternatives (gh, stripe, curl, etc.).
 
 # tools defines which API calls your agent is allowed to make.
-# tools: []
+tools: []
 
 # scrubbing redacts sensitive patterns from API responses before they reach the agent.
 scrubbing:
