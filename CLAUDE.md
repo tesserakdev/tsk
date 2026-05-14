@@ -37,7 +37,7 @@ tsk communicates with agents over `stdio` using standard MCP (JSON-RPC 2.0). Cre
 - `internal/cli` — Cobra command constructors (`NewRootCmd`, `newInitCmd`, `newRunCmd`, `newLogsCmd`)
 - `internal/mcp` — JSON-RPC 2.0 MCP server (`Server`, `Serve(ctx, r, w)`)
 - `internal/config` — rules.yaml parser
-- `internal/secrets` — `.secrets` file loader and `${KEY}` interpolation
+- `internal/secrets` — `.secrets` file loader, `${KEY}` interpolation, and live hot-reload via mtime gating
 - `internal/proxy` — HTTP tool execution with param filtering and constraint enforcement
 - `internal/scrubber` — response scrubbing (built-in types + custom regex)
 - `internal/ratelimit` — per-tool sliding-window rate limiter
@@ -47,7 +47,7 @@ tsk communicates with agents over `stdio` using standard MCP (JSON-RPC 2.0). Cre
 **Key runtime paths:**
 - `~/.tsk/.secrets` — credential store (never read by the agent)
 - `~/.tsk/rules.yaml` — tool definitions, rate limits, param constraints, scrubbing rules
-- `~/.tsk/activity.db` — local SQLite log of every tool call
+- `~/.tsk/activity.db` — local SQLite log of every tool call and credential rotation (`requests` + `credential_rotations` tables)
 
 **rules.yaml structure:**
 - `tools[]` — each entry defines an MCP tool: name, HTTP endpoint/method, credential reference (`${SECRET_NAME}`), rate limits, allowed params, param constraints
@@ -56,4 +56,4 @@ tsk communicates with agents over `stdio` using standard MCP (JSON-RPC 2.0). Cre
 **CLI commands:**
 - `tsk init` — creates `~/.tsk/` with default secrets file and rules file
 - `tsk run` — starts the MCP server (`--dir` overrides the tsk directory)
-- `tsk logs` — queries the activity log (`--tail`, `--tool`, `--since`, `--dir` flags)
+- `tsk logs` — queries the activity log (`--tail`, `--tool`, `--since`, `--type`, `--dir` flags); shows requests and rotation events interleaved newest-first

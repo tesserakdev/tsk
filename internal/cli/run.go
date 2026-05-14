@@ -95,12 +95,19 @@ func buildServer(ctx context.Context, tskDir string) (*mcp.Server, func(), error
 		return nil, nil, fmt.Errorf("opening db: %w", err)
 	}
 
+	log := activitylog.New(db)
+	secProvider.SetOnRotate(func(keys []string) {
+		if err := log.RecordRotation(keys); err != nil {
+			slog.Error("failed to record credential rotation", slog.Any("error", err))
+		}
+	})
+
 	server := mcp.New(mcp.Config{
 		Tools:        cfg.Tools,
 		Exec:         proxy.New(secProvider),
 		Scrubber:     sc,
 		Limiters:     limiters,
-		Log:          activitylog.New(db),
+		Log:          log,
 		Instructions: cfg.Instructions,
 	})
 

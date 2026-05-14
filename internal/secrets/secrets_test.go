@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tesserakdev/tsk/internal/secrets"
 )
@@ -200,5 +201,76 @@ func TestFileProvider_Validate_Missing(t *testing.T) {
 	}
 	if err := p.Validate([]string{"bearer ${MISSING}"}); err == nil {
 		t.Fatal("expected error for missing ref, got nil")
+	}
+}
+
+func TestFileProvider_HotReload(t *testing.T) {
+	path := writeFile(t, "TOKEN=old\n")
+	p, err := secrets.NewFileProvider(path)
+	if err != nil {
+		t.Fatalf("NewFileProvider: %v", err)
+	}
+
+	// Confirm initial value.
+	got, _ := p.Interpolate(context.Background(), "${TOKEN}")
+	if got != "old" {
+		t.Fatalf("before reload: got %q, want %q", got, "old")
+	}
+
+	// Overwrite the file and force mtime at least 1 second past the initial
+	// value, so the reload is detected on filesystems with 1-second granularity.
+	initialInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("TOKEN=new\nEXTRA=added\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	future := initialInfo.ModTime().Add(time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	// Track which keys the callback reports.
+	var rotatedKeys []string
+	p.SetOnRotate(func(keys []string) { rotatedKeys = append(rotatedKeys, keys...) })
+
+	got, _ = p.Interpolate(context.Background(), "${TOKEN}")
+	if got != "new" {
+		t.Errorf("after reload: got %q, want %q", got, "new")
+	}
+	got, _ = p.Interpolate(context.Background(), "${EXTRA}")
+	if got != "added" {
+		t.Errorf("after reload: EXTRA = %q, want %q", got, "added")
+	}
+
+	// Callback must have fired with the changed key names (never values).
+	if len(rotatedKeys) == 0 {
+		t.Error("onRotate callback was not called")
+	}
+	for _, k := range rotatedKeys {
+		if strings.Contains(k, "new") || strings.Contains(k, "added") {
+			t.Errorf("onRotate callback leaked a value: %q", k)
+		}
+	}
+}
+
+func TestFileProvider_HotReload_NoCallbackWhenUnchanged(t *testing.T) {
+	path := writeFile(t, "TOKEN=value\n")
+	p, err := secrets.NewFileProvider(path)
+	if err != nil {
+		t.Fatalf("NewFileProvider: %v", err)
+	}
+
+	called := 0
+	p.SetOnRotate(func(_ []string) { called++ })
+
+	// Multiple Interpolate calls with no file change — callback must not fire.
+	for range 5 {
+		p.Interpolate(context.Background(), "${TOKEN}") //nolint:errcheck
+	}
+
+	if called != 0 {
+		t.Errorf("onRotate called %d times with no file change, want 0", called)
 	}
 }

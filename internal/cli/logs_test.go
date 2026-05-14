@@ -26,7 +26,7 @@ func TestRunLogs_NoEntries(t *testing.T) {
 	dir, _ := setupLogsDB(t)
 
 	var buf bytes.Buffer
-	if err := runLogs(dir, 0, "", 0, &buf); err != nil {
+	if err := runLogs(dir, 0, "", 0, "", &buf); err != nil {
 		t.Fatalf("runLogs: %v", err)
 	}
 
@@ -35,7 +35,7 @@ func TestRunLogs_NoEntries(t *testing.T) {
 	}
 }
 
-func TestRunLogs_ShowsEntries(t *testing.T) {
+func TestRunLogs_ShowsRequests(t *testing.T) {
 	dir, log := setupLogsDB(t)
 
 	tools := []string{"tool_alpha", "tool_beta", "tool_gamma"}
@@ -46,7 +46,7 @@ func TestRunLogs_ShowsEntries(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runLogs(dir, 0, "", 0, &buf); err != nil {
+	if err := runLogs(dir, 0, "", 0, "", &buf); err != nil {
 		t.Fatalf("runLogs: %v", err)
 	}
 
@@ -55,6 +55,56 @@ func TestRunLogs_ShowsEntries(t *testing.T) {
 		if !strings.Contains(out, name) {
 			t.Errorf("output missing tool %q:\n%s", name, out)
 		}
+	}
+}
+
+func TestRunLogs_ShowsRotations(t *testing.T) {
+	dir, log := setupLogsDB(t)
+
+	if err := log.RecordRotation([]string{"API_KEY", "SECRET"}); err != nil {
+		t.Fatalf("RecordRotation: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runLogs(dir, 0, "", 0, "", &buf); err != nil {
+		t.Fatalf("runLogs: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "rotation") {
+		t.Errorf("output missing rotation event:\n%s", out)
+	}
+	if !strings.Contains(out, "API_KEY") {
+		t.Errorf("output missing key name:\n%s", out)
+	}
+}
+
+func TestRunLogs_MixedOrder(t *testing.T) {
+	dir, log := setupLogsDB(t)
+
+	base := time.Now().Add(-10 * time.Second)
+	if err := log.Record(activitylog.Entry{Tool: "early_tool", Status: 200, TS: base}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	// Rotation logged after the request.
+	if err := log.RecordRotation([]string{"MY_KEY"}); err != nil {
+		t.Fatalf("RecordRotation: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runLogs(dir, 0, "", 0, "", &buf); err != nil {
+		t.Fatalf("runLogs: %v", err)
+	}
+
+	out := buf.String()
+	rotIdx := strings.Index(out, "rotation")
+	reqIdx := strings.Index(out, "early_tool")
+	if rotIdx < 0 || reqIdx < 0 {
+		t.Fatalf("missing events in output:\n%s", out)
+	}
+	// Newest-first: rotation (recorded now) should appear before the older request.
+	if rotIdx > reqIdx {
+		t.Errorf("rotation should appear before older request (newest-first):\n%s", out)
 	}
 }
 
@@ -68,23 +118,14 @@ func TestRunLogs_TailFilter(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runLogs(dir, 2, "", 0, &buf); err != nil {
+	if err := runLogs(dir, 2, "", 0, "", &buf); err != nil {
 		t.Fatalf("runLogs: %v", err)
 	}
 
 	out := buf.String()
-	// Count data rows (skip header lines)
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	dataLines := 0
-	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if l == "" || strings.HasPrefix(l, "ID") || strings.HasPrefix(l, "--") {
-			continue
-		}
-		dataLines++
-	}
-	if dataLines != 2 {
-		t.Errorf("expected 2 data rows, got %d\noutput:\n%s", dataLines, out)
+	if len(lines) != 2 {
+		t.Errorf("expected 2 lines with tail=2, got %d\noutput:\n%s", len(lines), out)
 	}
 }
 
@@ -103,7 +144,7 @@ func TestRunLogs_ToolFilter(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runLogs(dir, 0, "tool_a", 0, &buf); err != nil {
+	if err := runLogs(dir, 0, "tool_a", 0, "", &buf); err != nil {
 		t.Fatalf("runLogs: %v", err)
 	}
 
@@ -119,7 +160,6 @@ func TestRunLogs_ToolFilter(t *testing.T) {
 func TestRunLogs_SinceFilter(t *testing.T) {
 	dir, log := setupLogsDB(t)
 
-	// Insert an old entry (2 hours ago)
 	if err := log.Record(activitylog.Entry{
 		Tool:   "old_tool",
 		Status: 200,
@@ -127,8 +167,6 @@ func TestRunLogs_SinceFilter(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Record old entry: %v", err)
 	}
-
-	// Insert a recent entry (1 minute ago)
 	if err := log.Record(activitylog.Entry{
 		Tool:   "recent_tool",
 		Status: 200,
@@ -138,7 +176,7 @@ func TestRunLogs_SinceFilter(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runLogs(dir, 0, "", 30*time.Minute, &buf); err != nil {
+	if err := runLogs(dir, 0, "", 30*time.Minute, "", &buf); err != nil {
 		t.Fatalf("runLogs: %v", err)
 	}
 
@@ -148,5 +186,100 @@ func TestRunLogs_SinceFilter(t *testing.T) {
 	}
 	if !strings.Contains(out, "recent_tool") {
 		t.Errorf("output missing recent_tool:\n%s", out)
+	}
+}
+
+func TestRunLogs_TypeRequestFilter(t *testing.T) {
+	dir, log := setupLogsDB(t)
+
+	if err := log.Record(activitylog.Entry{Tool: "my_tool", Status: 200}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := log.RecordRotation([]string{"KEY"}); err != nil {
+		t.Fatalf("RecordRotation: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runLogs(dir, 0, "", 0, "request", &buf); err != nil {
+		t.Fatalf("runLogs: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "rotation") {
+		t.Errorf("--type=request should exclude rotation events:\n%s", out)
+	}
+	if !strings.Contains(out, "my_tool") {
+		t.Errorf("output missing request entry:\n%s", out)
+	}
+}
+
+func TestRunLogs_TypeRotationFilter(t *testing.T) {
+	dir, log := setupLogsDB(t)
+
+	if err := log.Record(activitylog.Entry{Tool: "my_tool", Status: 200}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := log.RecordRotation([]string{"API_KEY"}); err != nil {
+		t.Fatalf("RecordRotation: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runLogs(dir, 0, "", 0, "rotation", &buf); err != nil {
+		t.Fatalf("runLogs: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "my_tool") {
+		t.Errorf("--type=rotation should exclude request events:\n%s", out)
+	}
+	if !strings.Contains(out, "API_KEY") {
+		t.Errorf("output missing rotation entry:\n%s", out)
+	}
+}
+
+func TestRunLogs_ScrubActionsShown(t *testing.T) {
+	dir, log := setupLogsDB(t)
+
+	if err := log.Record(activitylog.Entry{Tool: "t", Status: 200, ScrubActions: 3}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runLogs(dir, 0, "", 0, "", &buf); err != nil {
+		t.Fatalf("runLogs: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "[3 scrubs]") {
+		t.Errorf("expected [3 scrubs] in output:\n%s", buf.String())
+	}
+}
+
+func TestRunLogs_ZeroScrubsHidden(t *testing.T) {
+	dir, log := setupLogsDB(t)
+
+	if err := log.Record(activitylog.Entry{Tool: "t", Status: 200, ScrubActions: 0}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runLogs(dir, 0, "", 0, "", &buf); err != nil {
+		t.Fatalf("runLogs: %v", err)
+	}
+
+	if strings.Contains(buf.String(), "scrubs") {
+		t.Errorf("expected scrubs to be hidden when count is 0:\n%s", buf.String())
+	}
+}
+
+func TestRunLogs_InvalidTypeReturnsError(t *testing.T) {
+	dir, _ := setupLogsDB(t)
+
+	var buf bytes.Buffer
+	err := runLogs(dir, 0, "", 0, "badvalue", &buf)
+	if err == nil {
+		t.Fatal("expected error for unknown --type value, got nil")
+	}
+	if !strings.Contains(err.Error(), "badvalue") {
+		t.Errorf("error should mention the bad value: %v", err)
 	}
 }

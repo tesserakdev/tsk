@@ -154,23 +154,39 @@ The agent receives the scrubbed response. The original is retained only in the l
 
 ## Local Activity Log
 
-Every tool request routed through tsk is written to a local SQLite database at `~/.tsk/activity.db`.
+Every tool call and every credential rotation is written to a local SQLite database at `~/.tsk/activity.db`. The log is queryable with `tsk logs`:
 
 ```bash
-# Tail recent activity
+# Tail recent activity (requests and rotation events, newest first)
 tsk logs --tail 20
 
-# Filter by tool
+# Filter by tool (applies to request entries only; rotation events still appear)
 tsk logs --tool stripe_refund
 
 # Filter by time range
 tsk logs --since 1h
 
+# Show only credential rotation events
+tsk logs --type rotation
+
+# Show only tool call events
+tsk logs --type request
+
 # Raw SQL access
 sqlite3 ~/.tsk/activity.db "SELECT * FROM requests ORDER BY ts DESC LIMIT 10"
+sqlite3 ~/.tsk/activity.db "SELECT * FROM credential_rotations ORDER BY ts DESC"
 ```
 
-Each log entry records the tool name, request parameters (with credentials stripped), response status, scrubbing actions applied, and the scrubbed response body (truncated to 4 KB by default). Useful for debugging what your agent actually called vs. what you expected it to call.
+Output is a time-ordered log stream mixing both event types:
+
+```
+2026-05-14 10:30:01  request   stripe_refund  200  {"id":"re_..."}
+2026-05-14 10:31:44  request   stripe_refund  402  {"error":"card_declined"}  [1 scrubs]
+2026-05-14 10:35:00  rotation  STRIPE_TEST_KEY
+2026-05-14 10:36:12  request   stripe_refund  200  {"id":"re_..."}
+```
+
+Each request entry records the tool name, parameters (with credentials stripped), HTTP status, scrubbing actions applied, and the scrubbed response body (truncated to 4 KB by default). Scrub count is shown only when non-zero.
 
 You can disable truncation or set a tighter cap per tool:
 
@@ -179,6 +195,23 @@ rules:
   max_log_bytes: 0     # retain full response body (no truncation)
   max_log_bytes: 8192  # explicit cap in bytes
   # omit to use the default 4 KB cap
+```
+
+## Live Credential Rotation
+
+You can rotate a credential while a long-running agent session is active — no restart required. Edit `~/.tsk/.secrets`, save, and tsk picks up the new value on the next tool call:
+
+```bash
+# Update a key in place
+sed -i 's/^STRIPE_TEST_KEY=.*/STRIPE_TEST_KEY=sk_test_NEW/' ~/.tsk/.secrets
+```
+
+The file must remain `0600`. tsk checks the modification time on each call and reloads if the file has changed. If the reload fails (e.g. a bad format during an in-progress write), the previous secrets are kept and a warning is logged — in-flight calls are never disrupted.
+
+Every rotation is recorded in the audit log with the names of the changed keys:
+
+```
+2026-05-14 10:35:00  rotation  STRIPE_TEST_KEY
 ```
 
 ## Agent Tool Preference
