@@ -465,3 +465,117 @@ func TestExecute_ParamConstraints_WithinBounds(t *testing.T) {
 		t.Fatalf("unexpected error for valid amount: %v", err)
 	}
 }
+
+func TestExecute_AllowedValues_Pass(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	e := proxy.NewWithPrivate(secrets.NewMapProvider(nil))
+	tool := config.Tool{
+		Name:     "send_msg",
+		Type:     "http",
+		Method:   "POST",
+		Endpoint: srv.URL + "/messages",
+		Rules: config.ToolRules{
+			ParamConstraints: map[string]config.ParamConstraint{
+				"to": {AllowedValues: []string{"alice@company.com", "bob@company.com"}},
+			},
+		},
+	}
+	_, err := e.Execute(context.Background(), tool, map[string]any{"to": "alice@company.com"})
+	if err != nil {
+		t.Fatalf("unexpected error for allowed value: %v", err)
+	}
+}
+
+func TestExecute_AllowedValues_Reject(t *testing.T) {
+	e := proxy.New(secrets.NewMapProvider(nil))
+	tool := config.Tool{
+		Name:     "send_msg",
+		Type:     "http",
+		Method:   "POST",
+		Endpoint: "https://example.com/messages",
+		Rules: config.ToolRules{
+			ParamConstraints: map[string]config.ParamConstraint{
+				"to": {AllowedValues: []string{"alice@company.com", "bob@company.com"}},
+			},
+		},
+	}
+	_, err := e.Execute(context.Background(), tool, map[string]any{"to": "attacker@evil.com"})
+	if err == nil {
+		t.Fatal("expected error for disallowed value, got nil")
+	}
+	if !strings.Contains(err.Error(), "not in the allowed list") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestExecute_AllowedValues_StringParamNoNumericRequired(t *testing.T) {
+	e := proxy.New(secrets.NewMapProvider(nil))
+	tool := config.Tool{
+		Name:     "send_msg",
+		Type:     "http",
+		Method:   "POST",
+		Endpoint: "https://example.com/messages",
+		Rules: config.ToolRules{
+			ParamConstraints: map[string]config.ParamConstraint{
+				"to": {AllowedValues: []string{"alice@company.com"}},
+			},
+		},
+	}
+	_, err := e.Execute(context.Background(), tool, map[string]any{"to": "hacker@evil.com"})
+	if err == nil {
+		t.Fatal("expected rejection for disallowed value")
+	}
+	if strings.Contains(err.Error(), "must be numeric") {
+		t.Errorf("string param with allowed_values should not produce a numeric error: %v", err)
+	}
+}
+
+func TestExecute_AllowedValues_NonStringRejected(t *testing.T) {
+	e := proxy.New(secrets.NewMapProvider(nil))
+	tool := config.Tool{
+		Name:     "send_msg",
+		Type:     "http",
+		Method:   "POST",
+		Endpoint: "https://example.com/messages",
+		Rules: config.ToolRules{
+			ParamConstraints: map[string]config.ParamConstraint{
+				"to": {AllowedValues: []string{"alice@company.com"}},
+			},
+		},
+	}
+	_, err := e.Execute(context.Background(), tool, map[string]any{"to": 42})
+	if err == nil {
+		t.Fatal("expected error for non-string value with allowed_values constraint")
+	}
+	if !strings.Contains(err.Error(), "must be a string") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestExecute_AllowedValues_ParamAbsent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	e := proxy.NewWithPrivate(secrets.NewMapProvider(nil))
+	tool := config.Tool{
+		Name:     "send_msg",
+		Type:     "http",
+		Method:   "POST",
+		Endpoint: srv.URL + "/messages",
+		Rules: config.ToolRules{
+			ParamConstraints: map[string]config.ParamConstraint{
+				"to": {AllowedValues: []string{"alice@company.com"}},
+			},
+		},
+	}
+	_, err := e.Execute(context.Background(), tool, map[string]any{"subject": "hello"})
+	if err != nil {
+		t.Fatalf("absent constrained param should not cause error: %v", err)
+	}
+}

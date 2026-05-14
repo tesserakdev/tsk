@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -103,29 +104,39 @@ func (e *Executor) Execute(ctx context.Context, tool config.Tool, params map[str
 			continue
 		}
 
-		fval, ok := val.(float64)
-		if !ok {
-			// Try integer types that may come from callers.
-			switch v := val.(type) {
-			case int:
-				fval = float64(v)
-				ok = true
-			case int64:
-				fval = float64(v)
-				ok = true
+		if len(constraint.AllowedValues) > 0 {
+			strVal, ok := val.(string)
+			if !ok {
+				return Result{}, fmt.Errorf("param %q must be a string (allowed_values constraint)", name)
+			}
+			if !slices.Contains(constraint.AllowedValues, strVal) {
+				return Result{}, fmt.Errorf("param %q value %q is not in the allowed list", name, strVal)
 			}
 		}
-		if !ok {
-			return Result{}, fmt.Errorf("param %q must be numeric (constraint defined)", name)
-		}
 
-		num := fval
-		if constraint.Max != nil && num > *constraint.Max {
-			return Result{}, fmt.Errorf("param %q value %v exceeds maximum %v", name, num, *constraint.Max)
-		}
+		if constraint.Min != nil || constraint.Max != nil {
+			fval, ok := val.(float64)
+			if !ok {
+				// Try integer types that may come from callers.
+				switch v := val.(type) {
+				case int:
+					fval = float64(v)
+					ok = true
+				case int64:
+					fval = float64(v)
+					ok = true
+				}
+			}
+			if !ok {
+				return Result{}, fmt.Errorf("param %q must be numeric (min/max constraint defined)", name)
+			}
 
-		if constraint.Min != nil && num < *constraint.Min {
-			return Result{}, fmt.Errorf("param %q value %v is below minimum %v", name, num, *constraint.Min)
+			if constraint.Max != nil && fval > *constraint.Max {
+				return Result{}, fmt.Errorf("param %q value %v exceeds maximum %v", name, fval, *constraint.Max)
+			}
+			if constraint.Min != nil && fval < *constraint.Min {
+				return Result{}, fmt.Errorf("param %q value %v is below minimum %v", name, fval, *constraint.Min)
+			}
 		}
 	}
 
