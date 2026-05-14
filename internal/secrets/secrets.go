@@ -8,6 +8,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Provider resolves ${KEY} references in strings at call time.
@@ -16,8 +18,14 @@ type Provider interface {
 }
 
 // FileProvider loads secrets from a file and implements Provider.
+// It reloads the file on each Interpolate call when the file's modification
+// time has changed, enabling live credential rotation without restarting.
 type FileProvider struct {
-	m map[string]string
+	path     string
+	mu       sync.RWMutex
+	m        map[string]string
+	modTime  time.Time
+	onRotate func([]string)
 }
 
 // NewFileProvider reads the secrets file at path and returns a Provider.
@@ -26,18 +34,99 @@ func NewFileProvider(path string) (*FileProvider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &FileProvider{m: m}, nil
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat secrets file: %w", err)
+	}
+	return &FileProvider{path: path, m: m, modTime: info.ModTime()}, nil
 }
 
-// Interpolate replaces ${KEY} references using the loaded secrets.
+// SetOnRotate registers a callback invoked with the names of changed, added,
+// or removed keys whenever the secrets file is reloaded. The callback receives
+// key names only — never values. It is called synchronously outside the lock.
+func (p *FileProvider) SetOnRotate(fn func([]string)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onRotate = fn
+}
+
+// maybeReload checks the file's modification time and reloads if it has changed.
+// On any failure (stat error, bad permissions, parse error) the existing secrets
+// are retained so that in-flight requests are not disrupted.
+func (p *FileProvider) maybeReload() {
+	info, err := os.Stat(p.path)
+	if err != nil {
+		return
+	}
+
+	p.mu.RLock()
+	same := info.ModTime().Equal(p.modTime)
+	p.mu.RUnlock()
+
+	if same {
+		return
+	}
+
+	p.mu.Lock()
+	// Double-check after acquiring write lock in case another goroutine beat us.
+	if info.ModTime().Equal(p.modTime) {
+		p.mu.Unlock()
+		return
+	}
+
+	newSecrets, err := Load(p.path)
+	if err != nil {
+		p.mu.Unlock()
+		slog.Warn("secrets file changed but could not be reloaded; keeping existing secrets", slog.Any("error", err))
+		return
+	}
+
+	changed := diffKeys(p.m, newSecrets)
+	p.m = newSecrets
+	p.modTime = info.ModTime()
+	cb := p.onRotate
+	p.mu.Unlock()
+
+	if cb != nil && len(changed) > 0 {
+		cb(changed)
+	}
+}
+
+// Interpolate replaces ${KEY} references using the loaded secrets, reloading
+// the file first if its modification time has changed.
 func (p *FileProvider) Interpolate(_ context.Context, s string) (string, error) {
+	p.maybeReload()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return Interpolate(s, p.m), nil
+}
+
+// diffKeys returns the names of keys that were added, removed, or whose values
+// changed between old and updated. Values are never included in the result.
+func diffKeys(old, updated map[string]string) []string {
+	seen := make(map[string]struct{}, len(updated))
+	var changed []string
+	for k, v := range updated {
+		seen[k] = struct{}{}
+		if old[k] != v {
+			changed = append(changed, k)
+		}
+	}
+	for k := range old {
+		if _, ok := seen[k]; !ok {
+			changed = append(changed, k)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 // Validate checks that all ${KEY} references in the given strings are present
 // in the loaded secrets. This is an OSS startup check; call it once after
 // loading config.
 func (p *FileProvider) Validate(refs []string) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return ValidateRefs(p.m, refs...)
 }
 
