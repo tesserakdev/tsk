@@ -23,10 +23,15 @@ type Scrubber struct {
 
 // builtins maps type name → (pattern, replacement).
 var builtins = map[string][2]string{
-	"credit_card": {`\b(?:\d[ -]?){12,15}\d\b`, "[CREDIT CARD]"},
-	"iban":        {`\b[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}(?:[A-Z0-9]{0,16})?\b`, "[IBAN]"},
-	"email":       {`\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b`, "[EMAIL]"},
-	"ssn":         {`\b\d{3}-\d{2}-\d{4}\b`, "[SSN]"},
+	"credit_card":  {`\b(?:\d[ -]?){12,15}\d\b`, "[CREDIT CARD]"},
+	"iban":         {`\b[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}(?:[A-Z0-9]{0,16})?\b`, "[IBAN]"},
+	"email":        {`\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b`, "[EMAIL]"},
+	"ssn":          {`\b\d{3}-\d{2}-\d{4}\b`, "[SSN]"},
+	"jwt":          {`\b[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,}\b`, "[JWT]"},
+	"bearer_token": {`(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*`, "[BEARER TOKEN]"},
+	"aws_key_id":   {`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`, "[AWS KEY ID]"},
+	"gcp_api_key":  {`\bAIza[A-Za-z0-9\-_\\]{35}\b`, "[GCP API KEY]"},
+	"sk_key":       {`\bsk-(?:ant-)?[A-Za-z0-9\-_]{20,}\b`, "[API KEY]"},
 }
 
 // New builds a Scrubber from config scrub rules.

@@ -143,6 +143,9 @@ scrubbing:
   - type: credit_card
   - type: iban
   - type: email
+  - type: jwt
+  - type: bearer_token
+  - type: aws_key_id
   - pattern: '"internal_id":\s*"\w+"'
     replace: '"internal_id": "[REDACTED]"'
 ```
@@ -224,7 +227,7 @@ tools:
       max_log_bytes: int          # Audit log body cap: 0 = no truncation, omit = default 4 KB
 
 scrubbing:
-  - type: credit_card | iban | email | ssn
+  - type: credit_card | iban | email | ssn | jwt | bearer_token | aws_key_id | gcp_api_key | sk_key
   - pattern: string               # Custom regex
     replace: string               # Replacement string
 ```
