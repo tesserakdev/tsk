@@ -84,9 +84,14 @@ const defaultRules = `version: 1
 # tools: []
 
 # scrubbing redacts sensitive patterns from API responses before they reach the agent.
-# scrubbing:
-#   - type: credit_card
-#   - type: iban
+scrubbing:
+  - type: credit_card
+  - type: iban
+  - type: ssn
+  - type: jwt
+  - type: bearer_token
+  - type: aws_key_id
+  - type: gcp_api_key
+# opt-in types (uncomment if needed):
 #   - type: email
-#   - type: ssn
 `
